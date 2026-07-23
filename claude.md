@@ -11,6 +11,8 @@ system-tools/
 ├── install.sh          # copy scripts/* → ~/bin, set PATH (fish/bash/zsh)
 ├── README.md           # cara pakai
 ├── claude.md           # rencana ini
+├── docs/
+│   └── windows-plan.md # rencana dukungan Windows (auto-deteksi OS)
 └── scripts/
     ├── _lib.sh         # helper (warna, ukuran, konfirmasi, dry-run,
     │                   #   deteksi browser Chromium-family, top_dir)
@@ -43,6 +45,14 @@ system-tools/
 - Auto-hapus HANYA kategori aman & regenerable: cache, Trash, apt, journal.
 - TIDAK auto-hapus file berdasarkan umur (lama ≠ sampah). `junk-report`
   read-only menampilkan kandidat; keputusan hapus di tangan user.
+
+## Dukungan Windows (rencana)
+
+Kode sekarang Linux-only (bash + GNU coreutils). Rencana lintas-platform dengan
+**auto-deteksi OS** (Windows/Linux) — arsitektur (Python unified vs PowerShell
+twin), pemetaan tiap command ke padanan Windows, dan cleaner khusus Windows —
+ada di **[docs/windows-plan.md](docs/windows-plan.md)**. Status: rencana, belum
+diimplementasi; verifikasi harus di mesin Windows.
 
 ## Konvensi bersama (`_lib.sh`)
 

@@ -50,7 +50,7 @@ memetakan tiap temuan besar ke command yang tepat.
 | Ketik | Aksi |
 |-------|------|
 | `<nomor>` | Masuk ke folder itu (menyelam lebih dalam) |
-| `u` | Naik satu level ke atas |
+| `b` | **Back** — kembali ke folder sebelumnya (juga: `u`, `0`, atau Enter) |
 | `d <nomor>` | Hapus 1 item — mis. `d 2` (juga bisa `d2`) |
 | `d 1 3 5` | Hapus beberapa item sekaligus |
 | `d 2-6` | Hapus rentang nomor |
