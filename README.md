@@ -1,12 +1,19 @@
 # System Tools
 
-Utility maintenance disk untuk developer Linux/Ubuntu. Jaga disk supaya tidak
-penuh: cek dengan `disk-health` (pelacak mendalam), lalu jalankan cleaner yang
-direkomendasikannya. Portabel — jalan di mesin Ubuntu/Linux lain apa adanya
-(tool yang tidak ada otomatis di-skip; browser Chrome/Chromium/Brave/Edge/Vivaldi
-terdeteksi otomatis).
+Utility maintenance disk untuk developer. Jaga disk supaya tidak penuh: cek
+dengan `disk-health`, lalu jalankan cleaner yang direkomendasikannya.
 
-## Install
+Ada **dua stack** dengan konsep sama:
+
+| Stack | OS | Bahasa | Cara panggil |
+|-------|----|--------|--------------|
+| **`scripts/`** (asli) | Linux/Ubuntu | bash | `disk-health`, `system-clean`, … |
+| **`disktools/`** (baru) | **Windows** (& Linux) | Python | `python -m disktools <cmd>` atau shim `disk-health` |
+
+`disktools/` **auto-deteksi OS** saat dijalankan (`platform.system()`) dan pilih
+backend yang sesuai. Di bawah "[Windows](#windows-disktools--python-auto-deteksi-os)".
+
+## Install (Linux)
 
 ```bash
 ./install.sh
@@ -16,7 +23,106 @@ Meng-copy semua script ke `~/bin` dan memastikan `~/bin` ada di `PATH`
 (fish/bash/zsh). Buka shell baru setelahnya. Di mesin lain: salin folder repo
 ini, jalankan `./install.sh` — selesai.
 
-## Alur pemakaian
+## Windows (`disktools` — Python, auto-deteksi OS)
+
+**Syarat:** Python 3.12+ terpasang (cek `python --version`).
+
+### Cara menjalankan (langkah demi langkah)
+
+**Langkah 1 — Install (sekali saja).** Dari folder repo:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Ini membuat shim tiap command di `.\bin` dan menambahkannya ke PATH user.
+(Pakai `-NoPath` kalau tak mau menyentuh PATH — command tetap jalan lewat
+`python -m disktools`.)
+
+**Langkah 2 — Buka terminal BARU.** ⚠️ Penting: PATH baru **tidak** terbaca oleh
+terminal yang sudah terbuka. Kalau kamu pakai **VS Code / Windows Terminal**,
+tab baru pun belum cukup — **tutup total aplikasinya lalu buka lagi**, atau
+refresh sesi ini tanpa buka terminal baru:
+
+```powershell
+$env:Path = "$PWD\bin;$env:Path"
+```
+
+**Langkah 3 — Cek terpasang.**
+
+```powershell
+disk-health --all      # kalau tabel drive muncul → sukses
+```
+
+Kalau muncul `disk-health : The term ... is not recognized`, itu **PATH belum
+ke-refresh** — ulangi Langkah 2 (bukan error program).
+
+**Langkah 4 — Pakai.** Alur yang disarankan: **lihat → intip → jalankan.**
+
+```powershell
+disk-health --all            # 1. LIHAT: semua drive (SSD/HDD) + apa yang bisa dibebaskan
+system-clean --dry-run       # 2. INTIP: semua cleaner aman sekaligus (tak menghapus)
+system-clean -y              # 3. JALANKAN: bersihkan + lapor total ruang bebas
+
+# read-only / eksplorasi
+bloat-scan                   # buru bloat senyap: model AI/cache + file model besar
+disk-inspect -i              # selami folder + hapus terarah (default: folder home)
+
+# cleaner satuan (semua dukung --dry-run dulu, dan minta konfirmasi)
+temp-clean -y                # cache Temp
+node-clean -y                # cache dev (npm/pip)
+chrome-clean                 # cache browser (tutup browser dulu)
+chrome-ai-clean              # model AI on-device browser
+trash-clean --all -y         # kosongkan Recycle Bin semua drive
+```
+
+> **Tanpa install** juga bisa — panggil apa pun via `python -m disktools <command>`,
+> mis. `python -m disktools disk-health --all`.
+
+**Aturan aman:** cleaner **tidak akan menghapus** tanpa konfirmasi. Di terminal
+biasa muncul `[y/N]`; kalau dijalankan non-interaktif (pipe/script) tanpa `-y`,
+ia **menolak** dan tak menghapus apa pun. Selalu boleh `--dry-run` dulu.
+
+**Pilih penyimpanan (Target: auto-detect drive).** Semua fixed drive dienumerasi
++ ditandai ⚡SSD / 💽HDD dan drive sistem `[sistem]`. Pilih via `--drive C[,D]`,
+`--all`, atau prompt interaktif. Non-interaktif tanpa flag → default drive sistem.
+
+**Command Windows saat ini** (bertahap; sisanya menyusul):
+
+| Command | Fungsi | Hapus? |
+|---------|--------|:---:|
+| `disk-health` | Dashboard drive (SSD/HDD) + recoverable per-drive + rekomendasi | — (read-only) |
+| `bloat-scan` | Buru bloat senyap (model AI/runtime/cache) + sapu file model besar | — (read-only) |
+| `disk-inspect [path]` | Selami folder (♻ marker); `-i` = navigasi + hapus terarah | opsional (`-i`) |
+| `system-clean` | Jalankan semua cleaner aman berurutan (1 konfirmasi) | ✔ |
+| `temp-clean` | Cache Temp user + `C:\Windows\Temp` (admin) | ✔ |
+| `node-clean` | Cache dev (`npm-cache`, `pip\Cache`) | ✔ |
+| `chrome-clean` | Cache browser Chromium (Chrome/Edge/Brave) | ✔ |
+| `chrome-ai-clean` | Model AI on-device browser (`OptGuideOnDeviceModel`, dll) | ✔ |
+| `trash-clean` | Kosongkan Recycle Bin (`Clear-RecycleBin`) per drive | ✔ |
+
+**Flag:** `--drive C[,D]` / `--all` (pilih drive) · `-n`/`--dry-run` (intip) ·
+`-y`/`--yes` (skip konfirmasi) · `-i` (disk-inspect interaktif) · `NO_COLOR=1`.
+
+### Mode interaktif `disk-inspect -i`
+
+| Ketik | Aksi |
+|-------|------|
+| `<nomor>` | Masuk ke folder itu |
+| `b` | Back — folder sebelumnya (juga: `u`, `0`, Enter) |
+| `d <nomor>` | Hapus 1 item (mis. `d 2`) |
+| `d 1 3 5` / `d 2-6` | Hapus beberapa / rentang |
+| `d all` | Hapus **semua item `♻`** (cache/junk) di folder itu |
+| `q` | Keluar |
+
+Item `♻` = cache/junk regenerable (aman). Folder sensitif (`.ssh`, `.config`,
+`Windows`, `$Recycle.Bin`, …) otomatis dilindungi dari penghapusan.
+
+> Backend Linux `disktools` sudah ditulis tetapi **belum diverifikasi di mesin
+> Linux** — untuk Linux, pakai stack bash `scripts/` yang matang. Detail rencana &
+> status: [docs/windows-plan.md](docs/windows-plan.md).
+
+## Alur pemakaian (Linux / bash)
 
 ```bash
 # 1. LIHAT — dashboard mendalam: ke mana disk pergi, per aplikasi + rekomendasi
@@ -98,7 +204,7 @@ ini = data/konfigurasi Anda → hati-hati.
 > data penting (mis. `~/snap/firefox` = profil Anda). Pakai `disk-inspect` untuk
 > memastikan isinya sebelum menghapus.
 
-## Commands
+## Commands (Linux / bash)
 
 ### Lihat & lacak
 | Command | Fungsi |
