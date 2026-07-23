@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# chrome-ai-clean — remove Chrome's auto-downloaded on-device AI models
+# (OptGuideOnDeviceModel / Gemini Nano ~ several GB, plus screen_ai) and
+# optionally stop the browser from re-downloading them.
+#
+#   chrome-ai-clean            delete the model(s) now  (per-user, no sudo)
+#   chrome-ai-clean --disable  also install a policy so Chrome won't re-download (sudo)
+#
+# Deleting loses NO personal data (bookmarks/passwords/history untouched); the
+# model only comes back if you keep using Chrome's built-in AI features.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+DISABLE=0
+for a in "${ARGS[@]:-}"; do [[ "$a" == "--disable" ]] && DISABLE=1; done
+
+# Auto-downloaded model/component dirs inside a browser profile.
+AI_DIRS=(OptGuideOnDeviceModel optimization_guide_model_store screen_ai)
+
+title "chrome-ai-clean"
+mapfile -t cfgs < <(browser_config_dirs)
+if (( ${#cfgs[@]} == 0 )); then ok "No Chromium-family browser found."; exit 0; fi
+
+targets=()
+for name in "${AI_DIRS[@]}"; do
+  while IFS= read -r d; do targets+=("$d"); done \
+    < <(find "${cfgs[@]}" -maxdepth 3 -type d -name "$name" 2>/dev/null)
+done
+
+if (( ${#targets[@]} == 0 )); then
+  ok "No on-device AI models present."
+else
+  before=$(path_bytes "${targets[@]}")
+  info "On-device AI model data: $(human "$before")"
+  for t in "${targets[@]}"; do printf '    %8s  %s\n' "$(human "$(path_bytes "$t")")" "$t"; done
+
+  if browser_running; then
+    warn "Chrome is running. Close it FIRST — otherwise space isn't freed and the model may respawn."
+    confirm "Proceed anyway?" || { info "Cancelled. Close Chrome, then re-run."; exit 0; }
+  fi
+  confirm "Delete these AI model(s) ($(human "$before"))?" || { info "Cancelled."; exit 0; }
+
+  for t in "${targets[@]}"; do run rm -rf "$t"; done
+  after=$(path_bytes "${targets[@]}")
+  ok "Freed $(human $(( before - after )))."
+fi
+
+# --- optional: stop re-download via managed policy --------------------------
+if (( DISABLE )); then
+  echo
+  info "Installing policy so the browser stops downloading the on-device model."
+  # Map installed browsers to their Linux managed-policy directories.
+  declare -A POLICY_DIRS=(
+    ["$HOME/.config/google-chrome"]="/etc/opt/chrome/policies/managed"
+    ["$HOME/.config/chromium"]="/etc/chromium/policies/managed"
+    ["$HOME/.config/BraveSoftware/Brave-Browser"]="/etc/brave/policies/managed"
+  )
+  wrote=0
+  for cfg in "${cfgs[@]}"; do
+    pdir="${POLICY_DIRS[$cfg]:-}"
+    [[ -z "$pdir" ]] && continue
+    confirm "Write policy to $pdir? (needs sudo)" || continue
+    if [[ "$DRY_RUN" == 1 ]]; then
+      printf '%s[dry-run]%s sudo tee %s/90-disable-ondevice-ai.json  <<< GenAILocalFoundationalModelSettings=1\n' \
+        "$C_DIM" "$C_RESET" "$pdir"
+    else
+      sudo mkdir -p "$pdir"
+      printf '%s\n' '{ "GenAILocalFoundationalModelSettings": 1 }' \
+        | sudo tee "$pdir/90-disable-ondevice-ai.json" >/dev/null
+    fi
+    wrote=1
+  done
+  if (( wrote )); then
+    ok "Policy installed. Restart the browser; verify at chrome://policy."
+    info "To undo later: sudo rm .../policies/managed/90-disable-ondevice-ai.json"
+  fi
+else
+  echo
+  info "Model may re-download if you keep using built-in AI. To prevent it:"
+  info "  chrome-ai-clean --disable    (installs a no-download policy)"
+fi

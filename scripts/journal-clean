@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# journal-clean — vacuum the systemd journal down to a size cap.
+#   journal-clean [SIZE]   (default 200M, e.g. 100M, 500M, 1G)
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+KEEP="${ARGS[0]:-200M}"
+
+title "journal-clean"
+command -v journalctl >/dev/null 2>&1 || { ok "journalctl not available."; exit 0; }
+
+before=$(journalctl --disk-usage 2>/dev/null | grep -oP '[0-9.]+[KMGTP]?' | head -1)
+info "Journal currently: ${before:-unknown}"
+confirm "Vacuum journal down to ${KEEP}? (needs sudo)" || { info "Cancelled."; exit 0; }
+
+run sudo journalctl --vacuum-size="$KEEP"
+
+after=$(journalctl --disk-usage 2>/dev/null)
+ok "${after:-Done.}"

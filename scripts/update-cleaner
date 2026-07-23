@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# update-cleaner — pull the latest system-tools and reinstall into ~/bin.
+# Set SYSTEM_TOOLS_DIR if the repo lives somewhere other than the default.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+REPO="${SYSTEM_TOOLS_DIR:-$HOME/Projects/system-tools}"
+
+title "update-cleaner"
+if [[ ! -d "$REPO" ]]; then
+  err "Repo not found at $REPO. Set SYSTEM_TOOLS_DIR to its path."
+  exit 1
+fi
+info "Repo: $REPO"
+
+if [[ -d "$REPO/.git" ]]; then
+  run git -C "$REPO" pull --ff-only
+else
+  warn "Not a git repo — skipping pull, reinstalling from local files."
+fi
+
+run bash "$REPO/install.sh"
+ok "Updated."

@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# disk-inspect — drill into everything, a folder, or an app's data to see what
+# uses space, so YOU decide what to delete. Read-only unless you delete in -i.
+#
+#   disk-inspect                   browse ALL of $HOME interactively (no app needed)
+#   disk-inspect <path>            deep breakdown of a directory
+#   disk-inspect <app-keyword>     find & inspect an app's data (dbeaver, slack…)
+#   disk-inspect <target> -i       interactive: navigate in/out + delete on demand
+#   disk-inspect <target> --depth N   tree depth for the static view (default 2)
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+
+DEPTH=2
+INTERACTIVE=0
+TARGET=""
+HAD_TARGET=0
+while (( $# )); do
+  case "$1" in
+    -i|--interactive) INTERACTIVE=1 ;;
+    --depth) DEPTH="${2:-2}"; shift ;;
+    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) TARGET="$1"; HAD_TARGET=1 ;;
+  esac
+  shift
+done
+
+# No target given → browse the whole home directory interactively.
+if (( ! HAD_TARGET )); then
+  TARGET="$HOME"
+  INTERACTIVE=1
+fi
+
+# Locate an app's data across the standard XDG / snap / flatpak / home locations.
+find_app_dirs() {
+  local kw="$1" r d
+  shopt -s nullglob nocaseglob
+  local roots=(
+    "$HOME/.config" "$HOME/.cache" "$HOME/.local/share" "$HOME/.local/state"
+    "$HOME/snap" "$HOME/.var/app"
+  )
+  for r in "${roots[@]}"; do
+    [[ -d "$r" ]] || continue
+    for d in "$r"/*"$kw"*; do [[ -d "$d" ]] && printf '%s\n' "$d"; done
+  done
+  for d in "$HOME"/.*"$kw"* "$HOME"/*"$kw"*; do [[ -d "$d" ]] && printf '%s\n' "$d"; done
+  shopt -u nullglob nocaseglob
+}
+
+# A child is "safe-ish" to delete only inside $HOME and never a top-level root.
+safe_to_delete() {
+  local p="$1" base
+  case "$p" in "$HOME"/*) ;; *) return 1 ;; esac
+  [[ "$p" == "$HOME" ]] && return 1
+  for base in .config .local .cache .ssh .gnupg .mozilla .thunderbird; do
+    [[ "$p" == "$HOME/$base" ]] && return 1
+  done
+  return 0
+}
+
+# Static recursive view with dots.
+tree_view() {
+  local dir="$1" depth="$2" indent="${3:-  }"
+  local b p
+  while IFS=$'\t' read -r b p; do
+    [[ -z "$b" ]] && continue
+    local tag=""; [[ -f "$p" ]] && tag=" ${C_DIM}(file)${C_RESET}"
+    is_cache_junk "$p" && tag="$tag ${C_GREEN}♻ cache, aman hapus${C_RESET}"
+    printf '%s%s %8s  %s%s\n' "$indent" "$(size_dot "$b")" "$(human "$b")" "$(basename "$p")" "$tag"
+    if [[ -d "$p" ]] && (( depth > 1 )); then
+      tree_view "$p" $((depth-1)) "  $indent"
+    fi
+  done < <(list_children "$dir" | head -8)
+}
+
+inspect_path() {
+  local dir="$1"
+  local total; total=$(path_bytes "$dir")
+  title "$dir"
+  printf '  total %s%s%s\n\n' "$C_BOLD" "$(human "$total")" "$C_RESET"
+  tree_view "$dir" "$DEPTH"
+}
+
+# Interactive navigator: enter number to descend, u=up, d N=delete item N, q=quit.
+navigate() {
+  local cur="$1"
+  while :; do
+    local total; total=$(path_bytes "$cur")
+    printf '\n%s%s%s   %stotal %s%s\n' "$C_BOLD" "$cur" "$C_RESET" "$C_DIM" "$(human "$total")" "$C_RESET"
+    hr
+    local paths=() b p i=0 safe_total=0
+    while IFS=$'\t' read -r b p; do
+      [[ -z "$b" ]] && continue
+      paths+=("$p")
+      local kind="dir "; [[ -f "$p" ]] && kind="file"
+      local mark=""
+      if is_cache_junk "$p"; then mark=" ${C_GREEN}♻ aman hapus${C_RESET}"; safe_total=$(( safe_total + b )); fi
+      printf '  %2d) %s %8s  %s %s%s\n' "$((++i))" "$(size_dot "$b")" "$(human "$b")" "$C_DIM$kind$C_RESET" "$(basename "$p")" "$mark"
+    done < <(list_children "$cur" | head -20)
+    (( i == 0 )) && printf '  %s(empty)%s\n' "$C_DIM" "$C_RESET"
+    (( safe_total > 0 )) && printf '  %s♻ aman dihapus di sini: %s%s\n' "$C_GREEN" "$(human "$safe_total")" "$C_RESET"
+    printf '\n%snumber=open · u=up · d=delete (n · "1 3 5" · "2-6" · all) · q=quit%s\n> ' "$C_DIM" "$C_RESET"
+
+    local input; read -r input </dev/tty || break
+    case "$input" in
+      q|Q|'') break ;;
+      u|U)
+        local parent; parent=$(dirname "$cur")
+        [[ "$parent" == "$cur" ]] && { warn "Already at top."; continue; }
+        cur="$parent" ;;
+      d|D|d\ *|D\ *|d[0-9]*|D[0-9]*)
+        local spec tok a b k idx=()
+        spec="${input:1}"; spec="${spec# }"          # drop leading d/D and one space
+        if [[ -z "$spec" ]]; then
+          printf '  %sHapus mana? (nomor · "1 3 5" · "2-6" · all):%s > ' "$C_YELLOW" "$C_RESET"
+          read -r spec </dev/tty || continue
+        fi
+        # Expand the spec into a list of item numbers.
+        if [[ "$spec" == all || "$spec" == ALL || "$spec" == "*" ]]; then
+          for k in "${!paths[@]}"; do is_cache_junk "${paths[$k]}" && idx+=("$((k+1))"); done
+          (( ${#idx[@]} )) || { warn "Tidak ada item ♻ di sini (pilih nomor untuk hapus data)."; continue; }
+        else
+          local bad=0
+          for tok in $spec; do
+            if [[ "$tok" =~ ^[0-9]+-[0-9]+$ ]]; then
+              a="${tok%-*}"; b="${tok#*-}"; (( a<=b )) || { k=$a; a=$b; b=$k; }
+              for ((k=a; k<=b; k++)); do idx+=("$k"); done
+            elif [[ "$tok" =~ ^[0-9]+$ ]]; then idx+=("$tok")
+            else err "Token tidak valid: '$tok'"; bad=1; break; fi
+          done
+          (( bad )) && continue
+        fi
+        # Validate + de-dupe, split into deletable vs protected.
+        local seen=() del=() bytes=0 skipped=0 tgt
+        for k in "${idx[@]}"; do
+          (( k>=1 && k<=${#paths[@]} )) || { err "Nomor di luar jangkauan: $k"; continue; }
+          [[ -n "${seen[$k]:-}" ]] && continue; seen[$k]=1
+          tgt="${paths[$((k-1))]}"
+          if ! safe_to_delete "$tgt"; then warn "Dilewati (dilindungi): $(basename "$tgt")"; skipped=$((skipped+1)); continue; fi
+          del+=("$tgt"); bytes=$(( bytes + $(path_bytes "$tgt") ))
+        done
+        (( ${#del[@]} )) || { info "Tidak ada yang dihapus."; continue; }
+        # One confirmation for the whole batch.
+        printf '  %sHapus %d item (%s):%s\n' "$C_RED" "${#del[@]}" "$(human "$bytes")" "$C_RESET"
+        for tgt in "${del[@]}"; do printf '    - %s\n' "$tgt"; done
+        printf '  Lanjut? [y/N] '
+        local yn; read -r yn </dev/tty || continue
+        if [[ "$yn" =~ ^[Yy]$ ]]; then
+          for tgt in "${del[@]}"; do rm -rf "$tgt"; done
+          ok "Terhapus ${#del[@]} item · dibebaskan ~$(human "$bytes")."
+        else info "Dibatalkan."; fi ;;
+      *)
+        if [[ "$input" =~ ^[0-9]+$ ]] && (( input>=1 && input<=${#paths[@]} )); then
+          local sel="${paths[$((input-1))]}"
+          if [[ -d "$sel" ]]; then cur="$sel"; else warn "$(basename "$sel") is a file, not a folder."; fi
+        else
+          warn "Unknown command: $input"
+        fi ;;
+    esac
+  done
+  echo
+}
+
+# --- dispatch ----------------------------------------------------------------
+if [[ -d "$TARGET" ]]; then
+  START="$(cd "$TARGET" && pwd)"
+  (( INTERACTIVE )) && navigate "$START" || inspect_path "$START"
+  exit 0
+fi
+
+# Treat as app keyword.
+mapfile -t MATCHES < <(find_app_dirs "$TARGET" | sort -u)
+if (( ${#MATCHES[@]} == 0 )); then
+  err "No directory or app data found for '$TARGET'."
+  info "Try a path, or a keyword like: dbeaver, slack, code, chrome, jetbrains"
+  exit 1
+fi
+
+title "Data for '$TARGET'"
+grand=0
+for m in "${MATCHES[@]}"; do
+  sz=$(path_bytes "$m"); grand=$(( grand + sz ))
+  printf '  %s %8s  %s\n' "$(size_dot "$sz")" "$(human "$sz")" "$m"
+done
+printf '  %stotal ≈ %s%s\n' "$C_BOLD" "$(human "$grand")" "$C_RESET"
+
+if (( INTERACTIVE )); then
+  # Navigate the biggest match first.
+  navigate "${MATCHES[0]}"
+else
+  echo
+  for m in "${MATCHES[@]}"; do inspect_path "$m"; echo; done
+  printf '%sTip:%s drill down & delete interactively with:  disk-inspect %s -i\n' \
+    "$C_DIM" "$C_RESET" "$TARGET"
+fi

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# apt-clean — reclaim system package space: downloaded .deb cache + orphaned
+# packages and old kernels (autoremove). Debian/Ubuntu only. Needs sudo.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+title "apt-clean"
+command -v apt-get >/dev/null 2>&1 || { ok "apt not present (not a Debian/Ubuntu system)."; exit 0; }
+
+# Preview what autoremove would take out (simulation needs no sudo).
+mapfile -t removable < <(apt-get -s autoremove 2>/dev/null | awk '/^Remv /{print $2}')
+if (( ${#removable[@]} )); then
+  info "autoremove would remove ${#removable[@]} package(s):"
+  printf '    %s\n' "${removable[@]}"
+else
+  info "No orphaned packages to autoremove."
+fi
+
+confirm "Clean apt cache and autoremove orphans/old kernels? (needs sudo)" \
+  || { info "Cancelled."; exit 0; }
+
+run sudo apt-get clean
+run sudo apt-get autoremove --purge -y
+ok "apt cleaned."

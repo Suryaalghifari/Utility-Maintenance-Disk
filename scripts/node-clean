@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# node-clean — clear package-manager caches: npm, pnpm, pip, composer.
+# Only touches caches; nothing your projects depend on at runtime.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+title "node-clean"
+confirm "Clear npm/pnpm/pip/composer caches?" || { info "Cancelled."; exit 0; }
+
+if command -v npm >/dev/null 2>&1; then
+  info "npm cache clean"
+  run npm cache clean --force
+fi
+if command -v pnpm >/dev/null 2>&1; then
+  info "pnpm store prune"
+  run pnpm store prune
+fi
+if command -v pip3 >/dev/null 2>&1; then
+  info "pip cache purge"
+  run pip3 cache purge || true
+elif command -v pip >/dev/null 2>&1; then
+  info "pip cache purge"
+  run pip cache purge || true
+fi
+if command -v composer >/dev/null 2>&1; then
+  info "composer clear-cache"
+  run composer clear-cache
+fi
+
+ok "Package caches cleared."

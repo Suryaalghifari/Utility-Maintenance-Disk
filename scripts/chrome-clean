@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# chrome-clean — delete the on-disk cache of any Chromium-family browser
+# (Chrome, Chromium, Brave, Edge, Vivaldi, Opera). Browsers rebuild it on run.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+title "chrome-clean"
+mapfile -t DIRS < <(browser_cache_dirs)
+if (( ${#DIRS[@]} == 0 )); then ok "No browser cache found."; exit 0; fi
+
+browser_running && warn "A browser is running — close it first, else cache is recreated immediately."
+
+before=$(path_bytes "${DIRS[@]}")
+for d in "${DIRS[@]}"; do info "$(basename "$d"): $(human "$(path_bytes "$d")")"; done
+confirm "Delete cache of ${#DIRS[@]} browser(s)?" || { info "Cancelled."; exit 0; }
+
+for d in "${DIRS[@]}"; do
+  run find "$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+done
+
+after=$(path_bytes "${DIRS[@]}")
+ok "Freed $(human $(( before - after )))."

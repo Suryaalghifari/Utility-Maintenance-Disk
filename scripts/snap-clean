@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# snap-clean — remove disabled (old) snap revisions and cap future retention.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+title "snap-clean"
+command -v snap >/dev/null 2>&1 || { ok "snap not installed."; exit 0; }
+
+# Each line: "<name> <revision>" for revisions marked disabled.
+mapfile -t rows < <(snap list --all 2>/dev/null | awk '$0 ~ /disabled/ {print $1" "$3}')
+
+if (( ${#rows[@]} == 0 )); then
+  ok "No disabled snap revisions."
+else
+  info "Disabled revisions to remove:"
+  printf '    %s\n' "${rows[@]}"
+  if confirm "Remove ${#rows[@]} disabled snap revision(s)? (needs sudo)"; then
+    for r in "${rows[@]}"; do
+      read -r name rev <<<"$r"
+      run sudo snap remove "$name" --revision="$rev"
+    done
+    ok "Old revisions removed."
+  else
+    info "Skipped removal."
+  fi
+fi
+
+# Keep at most 2 revisions per snap going forward.
+if confirm "Set snap to retain only 2 revisions? (needs sudo)"; then
+  run sudo snap set system refresh.retain=2
+  ok "refresh.retain=2 set."
+fi

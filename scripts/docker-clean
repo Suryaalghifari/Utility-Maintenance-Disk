@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# docker-clean — reclaim Docker space. Default: prune dangling data + build cache.
+#   --all : also remove ALL unused images and volumes (more aggressive)
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+ALL=0
+for a in "${ARGS[@]:-}"; do [[ "$a" == "--all" ]] && ALL=1; done
+
+title "docker-clean"
+command -v docker >/dev/null 2>&1 || { ok "docker not installed."; exit 0; }
+if ! docker info >/dev/null 2>&1; then
+  err "Docker daemon not reachable (start it, or add your user to the 'docker' group)."
+  exit 1
+fi
+
+docker system df || true
+
+if (( ALL )); then
+  warn "--all removes every unused image and volume, not just dangling ones."
+  confirm "Run 'docker system prune -a --volumes'?" || { info "Cancelled."; exit 0; }
+  run docker system prune -a --volumes -f
+else
+  confirm "Run 'docker system prune' (dangling images, stopped containers, networks, build cache)?" \
+    || { info "Cancelled."; exit 0; }
+  run docker system prune -f
+fi
+ok "Docker cleaned."

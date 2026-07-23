@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+# disk-health — deep disk tracker: where space goes (down into each app's data)
+# plus concrete recommendations. Read-only; it never deletes anything.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+
+JOURNAL_KEEP_BYTES=$(( 200 * 1024 * 1024 ))   # journal-clean vacuums down to this
+BIG=$(( 500 * 1024 * 1024 ))                   # "worth mentioning" threshold (500MB)
+
+# Recommendations collected as "command :: reason"; printed at the end.
+RECS=()
+rec() { RECS+=("$1 :: $2"); }
+
+# print_line DOT LABEL BYTES  (padded label)
+line() { printf '  %s %-16s %s\n' "$1" "$2" "$(human "$3")"; }
+
+# breakdown DIR TITLE  -> show biggest children with a dot each
+breakdown() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 0
+  while IFS=$'\t' read -r b p; do
+    [[ -z "$b" ]] && continue
+    printf '    %s %-22s %s\n' "$(size_dot "$b")" "$(basename "$p")" "$(human "$b")"
+  done < <(top_dir "$dir" 6)
+}
+
+# --- Filesystem --------------------------------------------------------------
+root_pct=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9'); root_pct=${root_pct:-0}
+root_avail=$(df -h --output=avail / 2>/dev/null | tail -1 | tr -d ' ')
+
+title "Disk Health"
+hr
+title "Filesystem"
+printf '  %s Root  %s%% used · %s free\n' "$(pct_dot "$root_pct")" "$root_pct" "${root_avail:-?}"
+(( root_pct >= 90 )) && rec "system-clean" "root filesystem is ${root_pct}% full"
+
+# --- Home top-level ----------------------------------------------------------
+hr
+title "Biggest areas in \$HOME"
+info "scanning… (one-time du pass)"
+while IFS=$'\t' read -r b p; do
+  [[ -z "$b" ]] && continue
+  name=$(basename "$p")
+  printf '  %s %-18s %s\n' "$(size_dot "$b")" "$name" "$(human "$b")"
+  # Recommend junk-report for big data folders that have no dedicated cleaner.
+  case "$name" in
+    Downloads|Documents|Desktop|Videos|Pictures)
+      (( b >= BIG )) && rec "junk-report" "$name is $(human "$b") — review large/old files" ;;
+  esac
+done < <(top_dir "$HOME" 12)
+
+# --- Browsers ----------------------------------------------------------------
+hr
+title "Browsers"
+mapfile -t BCACHE < <(browser_cache_dirs)
+mapfile -t BCONF  < <(browser_config_dirs)
+if (( ${#BCACHE[@]} == 0 && ${#BCONF[@]} == 0 )); then
+  ok "No Chromium-family browser detected."
+else
+  b_cache=$(path_bytes "${BCACHE[@]:-}")
+  line "$(size_dot "$b_cache")" "Cache" "$b_cache"
+  (( b_cache >= 314572800 )) && rec "chrome-clean" "browser cache is $(human "$b_cache")"
+
+  sw_total=0; sw_dirs=()
+  for cfg in "${BCONF[@]:-}"; do
+    while IFS= read -r d; do sw_dirs+=("$d"); done \
+      < <(find "$cfg" -maxdepth 2 -type d -name "Service Worker" 2>/dev/null)
+  done
+  ((${#sw_dirs[@]})) && sw_total=$(path_bytes "${sw_dirs[@]}")
+  line "$(size_dot "$sw_total")" "Service Worker" "$sw_total"
+  (( sw_total >= 314572800 )) && rec "chrome-sw-clean" "service-worker cache is $(human "$sw_total")"
+
+  b_conf=$(path_bytes "${BCONF[@]:-}")
+  line "$(size_dot "$b_conf")" "Profiles (data)" "$b_conf"
+
+  # Reclaimable stuff hiding INSIDE the profile: GPU/shader caches, crx caches,
+  # and auto-downloaded AI/ML models (e.g. Chrome's 4 GB on-device model).
+  br_recl=0; mapfile -t RECL < <(browser_reclaimable)
+  if (( ${#RECL[@]} )); then
+    printf '  %sinternals (reclaimable):%s\n' "$C_DIM" "$C_RESET"
+    shown=0
+    for row in "${RECL[@]}"; do
+      rb="${row%%$'\t'*}"; rp="${row#*$'\t'}"
+      br_recl=$(( br_recl + ${rb:-0} ))
+      if (( shown < 5 )); then
+        printf '    %s %8s  %s\n' "$(size_dot "$rb")" "$(human "$rb")" "$(basename "$rp")"
+        shown=$((shown+1))
+      fi
+    done
+    (( br_recl >= 314572800 )) && rec "chrome-ai-clean" \
+      "browser has $(human "$br_recl") of caches/AI-models inside the profile (close Chrome first)"
+  fi
+fi
+
+# --- Dev / package-manager caches -------------------------------------------
+# Real cache locations node-clean actually clears (npm lives in ~/.npm, not ~/.cache).
+hr
+title "Dev caches (cleared by node-clean)"
+dev_total=0
+declare -A CACHE_PATHS=(
+  [npm]="$HOME/.npm/_cacache"
+  [pnpm]="$HOME/.cache/pnpm"
+  [pip]="$HOME/.cache/pip"
+  [composer]="$HOME/.cache/composer"
+  [node]="$HOME/.cache/node"
+  [yarn]="$HOME/.cache/yarn"
+  [go]="$HOME/.cache/go-build"
+)
+for name in npm pnpm pip composer node yarn go; do
+  d="${CACHE_PATHS[$name]}"
+  [[ -d "$d" ]] || continue
+  sz=$(path_bytes "$d"); dev_total=$(( dev_total + sz ))
+  line "$(size_dot "$sz")" "$name" "$sz"
+done
+(( dev_total )) || ok "No package-manager caches."
+(( dev_total >= 314572800 )) && rec "node-clean" "package caches total $(human "$dev_total")"
+
+pw=$(path_bytes "$HOME/.cache/ms-playwright")
+if (( pw > 0 )); then
+  line "$(size_dot "$pw")" "playwright" "$pw"
+  (( pw >= BIG )) && rec "npx playwright uninstall --all" "Playwright browsers use $(human "$pw") (real dependency — re-downloads on next use)"
+fi
+
+# --- System ------------------------------------------------------------------
+hr
+title "System"
+
+journal_str=$(journalctl --disk-usage 2>/dev/null | grep -oP '[0-9.]+[KMGTP]?' | head -1)
+journal_bytes=0
+[[ -n "$journal_str" ]] && journal_bytes=$(numfmt --from=iec "$journal_str" 2>/dev/null || echo 0)
+journal_recover=$(( journal_bytes > JOURNAL_KEEP_BYTES ? journal_bytes - JOURNAL_KEEP_BYTES : 0 ))
+line "$(size_dot "$journal_bytes")" "Journal" "$journal_bytes"
+(( journal_recover > 0 )) && rec "journal-clean" "journal is $(human "$journal_bytes") (can free ~$(human "$journal_recover"))"
+
+snap_disabled=0
+if command -v snap >/dev/null 2>&1; then
+  snap_disabled=$(snap list --all 2>/dev/null | grep -c disabled || true)
+fi
+printf '  %s %-16s %s disabled revision(s)\n' \
+  "$([[ $snap_disabled -gt 0 ]] && printf '🟡' || printf '🟢')" "Snap" "$snap_disabled"
+(( snap_disabled > 0 )) && rec "snap-clean" "$snap_disabled old snap revision(s)"
+
+docker_reclaim_bytes=0
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  docker_reclaim_bytes=$(docker system df --format '{{.Reclaimable}}' 2>/dev/null \
+    | grep -oP '^[0-9.]+[KMGT]?B?' | head -1 | sed 's/B$//' \
+    | numfmt --from=iec 2>/dev/null || echo 0)
+  line "$(size_dot "$docker_reclaim_bytes")" "Docker" "$docker_reclaim_bytes"
+  (( docker_reclaim_bytes >= 314572800 )) && rec "docker-clean" "$(human "$docker_reclaim_bytes") reclaimable in Docker"
+else
+  printf '  ⚪ %-16s n/a (daemon not reachable)\n' "Docker"
+fi
+
+if command -v apt-get >/dev/null 2>&1; then
+  autorm=$(apt-get -s autoremove 2>/dev/null | awk '/^Remv /{c++} END{print c+0}')
+  printf '  %s %-16s %s auto-removable package(s)\n' \
+    "$([[ ${autorm:-0} -gt 0 ]] && printf '🟡' || printf '🟢')" "apt" "${autorm:-0}"
+  (( ${autorm:-0} > 0 )) && rec "apt-clean" "${autorm} orphaned package(s)/old kernels"
+fi
+
+trash=$(path_bytes "$HOME/.local/share/Trash")
+printf '  %s %-16s %s\n' "$(size_dot "$trash")" "Trash" "$(human "$trash")"
+(( trash > 0 )) && rec "trash-clean" "Trash holds $(human "$trash")"
+
+# --- Recoverable + recommendations ------------------------------------------
+recoverable=$(( ${b_cache:-0} + ${sw_total:-0} + journal_recover + docker_reclaim_bytes + dev_total + trash + ${br_recl:-0} ))
+hr
+title "Safely recoverable now"
+printf '  %s≈ %s%s  (browser cache/internals + service worker + journal + docker + dev caches + trash)\n' \
+  "$C_BOLD" "$(human "$recoverable")" "$C_RESET"
+(( ${br_recl:-0} >= 314572800 )) && printf '  %snote: includes browser AI-models that re-download if you keep using the feature%s\n' "$C_DIM" "$C_RESET"
+
+hr
+title "Recommended"
+if (( ${#RECS[@]} == 0 )); then
+  ok "Nothing urgent — disk looks healthy."
+else
+  for r in "${RECS[@]}"; do
+    cmd="${r%% :: *}"; why="${r##* :: }"
+    printf '  %s→ %-28s%s %s%s%s\n' "$C_CYAN" "$cmd" "$C_RESET" "$C_DIM" "$why" "$C_RESET"
+  done
+  printf '\n  %sRun a single one above, or %ssystem-clean%s%s for all safe cleaners.%s\n' \
+    "$C_DIM" "$C_RESET$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
+fi
+echo

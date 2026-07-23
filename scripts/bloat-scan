@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# bloat-scan — READ-ONLY. Hunts for space that grows silently: auto-downloaded
+# AI models, browser components, cached installers, big runtimes/SDKs — then
+# sweeps for ANY large file so nothing hides. Deletes nothing; remove with
+# disk-inspect (-i) or the targeted cleaners it points to.
+#   bloat-scan [MIN_MB]     large-file sweep threshold (default 200)
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+MIN_MB="${ARGS[0]:-200}"
+MIN_BYTES=$(( MIN_MB * 1024 * 1024 ))
+
+# icon by kind: cache=safe / model=re-downloads / sdk=rebuildable / data=careful
+kind_icon() {
+  case "$1" in
+    cache) printf '🧹';; model) printf '⬇';; sdk) printf '🔁';; *) printf '📦';;
+  esac
+}
+
+# report PATH LABEL KIND — print a line if the path exists (any size)
+report() {
+  local p="$1" label="$2" kind="$3" b
+  [[ -e "$p" ]] || return 0
+  b=$(path_bytes "$p")
+  (( b == 0 )) && return 0
+  printf '  %s %s %8s  %-22s %s%s%s\n' \
+    "$(kind_icon "$kind")" "$(size_dot "$b")" "$(human "$b")" "$label" "$C_DIM" "$p" "$C_RESET"
+}
+
+title "bloat-scan  (read-only)"
+info "🧹 cache=aman · ⬇ model/runtime=re-download · 🔁 sdk=rebuild · 📦 data=hati-hati"
+
+# --- 1. Browser AI models & components --------------------------------------
+hr
+title "Browser AI models & components"
+found=0
+while IFS=$'\t' read -r b p; do
+  [[ -z "$b" ]] && continue
+  found=1
+  printf '  ⬇ %s %8s  %s%s%s\n' "$(size_dot "$b")" "$(human "$b")" "$C_DIM" "$p" "$C_RESET"
+done < <(browser_reclaimable | head -10)
+(( found )) || ok "None."
+
+# --- 2. Known heavy caches / models / SDKs ----------------------------------
+hr
+title "Known silent-bloat locations"
+# editors / electron
+report "$HOME/.config/Code/CachedExtensionVSIXs"  "VSCode vsix cache" cache
+report "$HOME/.config/Code/CachedData"            "VSCode cached data" cache
+report "$HOME/.vscode/extensions"                 "VSCode extensions"  data
+report "$HOME/.config/Code/logs"                  "VSCode logs"        cache
+# ML model stores (re-download)
+report "$HOME/.cache/huggingface"     "HuggingFace models" model
+report "$HOME/.cache/torch"           "PyTorch hub"        model
+report "$HOME/.cache/whisper"         "Whisper models"     model
+report "$HOME/.ollama/models"         "Ollama models"      model
+report "$HOME/.cache/ms-playwright"   "Playwright browsers" model
+report "$HOME/.cache/puppeteer"       "Puppeteer browsers"  model
+# runtimes / SDK caches (rebuild)
+report "$HOME/.gradle/caches"  "Gradle caches"  sdk
+report "$HOME/.android"        "Android SDK/AVD" sdk
+report "$HOME/.nuget"          "NuGet packages" sdk
+report "$HOME/.dotnet"         ".NET"           sdk
+report "$HOME/.cache/go-build" "Go build cache" sdk
+report "$HOME/.cargo/registry" "Cargo registry" sdk
+report "$HOME/.rustup"         "Rust toolchains" sdk
+report "$HOME/.nv/ComputeCache" "NVIDIA compute cache" cache
+
+# --- 3. Large-file sweep (catch anything unknown) ---------------------------
+hr
+title "Any file ≥ ${MIN_MB} MB (nothing hides)"
+found=0
+while IFS=$'\t' read -r sz path; do
+  [[ -z "$sz" ]] && continue
+  found=1
+  tag=""
+  case "$path" in
+    *.bin|*.gguf|*.onnx|*.safetensors|*.pt|*.pth|*.ckpt|*.h5|*weights*|*.mlmodel)
+      tag=" ${C_DIM}⬇ looks like a model${C_RESET}" ;;
+  esac
+  printf '  %s %8s  %s%s\n' "$(size_dot "$sz")" "$(human "$sz")" "$path" "$tag"
+done < <(find "$HOME" -xdev -type f -size +"${MIN_MB}"M -printf '%s\t%p\n' 2>/dev/null | sort -rn | head -20)
+(( found )) || ok "No single file ≥ ${MIN_MB} MB."
+
+# --- next steps -------------------------------------------------------------
+hr
+title "Next steps"
+printf '  %sRemove interactively:%s disk-inspect <path> -i\n' "$C_DIM" "$C_RESET"
+printf '  %sBrowser AI model:%s chrome-ai-clean [--disable]\n' "$C_DIM" "$C_RESET"
+printf '  %sLower threshold:%s bloat-scan 100\n' "$C_DIM" "$C_RESET"
+echo

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# junk-report — READ-ONLY. Surfaces likely junk so YOU decide what to delete:
+#   - biggest folders under $HOME
+#   - large files (>SIZE) not modified in DAYS, in common "dump" folders
+# Nothing is ever deleted here. Tune with: junk-report [DAYS] [SIZE_MB]
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+DAYS="${ARGS[0]:-90}"
+SIZE_MB="${ARGS[1]:-100}"
+
+title "junk-report  (read-only — deletes nothing)"
+info "old = not modified in ${DAYS}+ days · large = >${SIZE_MB} MB"
+
+hr
+title "Biggest folders in \$HOME"
+du -x -m --max-depth=1 "$HOME" 2>/dev/null | awk -v self="$HOME" '$2!=self' | sort -rn | head -12 \
+  | awk -v c="$C_DIM" -v r="$C_RESET" '{printf "  %6d MB  %s%s%s\n",$1,c,$2,r}'
+
+hr
+title "Large old files in dump folders"
+SCAN=("$HOME/Downloads" "$HOME/Desktop" "$HOME/Documents" "/tmp" "/var/tmp")
+found=0
+for dir in "${SCAN[@]}"; do
+  [[ -d "$dir" ]] || continue
+  while IFS= read -r -d '' f; do
+    sz=$(stat -c '%s' "$f" 2>/dev/null || echo 0)
+    printf '  %8s  %s\n' "$(human "$sz")" "$f"
+    found=1
+  done < <(find "$dir" -maxdepth 3 -type f -size +"${SIZE_MB}"M -mtime +"$DAYS" -print0 2>/dev/null)
+done
+(( found )) || ok "No large old files found in ${SCAN[*]}."
+
+hr
+title "Next steps"
+printf '  %sReview the list above, then delete manually what you do not need.%s\n' "$C_DIM" "$C_RESET"
+printf '  %sAuto-safe cleaners:%s trash-clean · chrome-clean · apt-clean · node-clean\n' "$C_DIM" "$C_RESET"
+echo

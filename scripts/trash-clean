@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# trash-clean — empty the desktop Trash (home + any mounted-drive trashes).
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+title "trash-clean"
+
+TRASHES=("$HOME/.local/share/Trash")
+# Trash folders on mounted volumes: /media/<user>/*/.Trash-<uid> etc.
+uid=$(id -u)
+for base in /media/"$USER"/* /run/media/"$USER"/*; do
+  [[ -d "$base/.Trash-$uid" ]] && TRASHES+=("$base/.Trash-$uid")
+done
+
+present=()
+for t in "${TRASHES[@]}"; do [[ -d "$t" ]] && present+=("$t"); done
+if (( ${#present[@]} == 0 )); then ok "Trash is already empty."; exit 0; fi
+
+before=$(path_bytes "${present[@]}")
+if (( before == 0 )); then ok "Trash is already empty."; exit 0; fi
+for t in "${present[@]}"; do info "$t: $(human "$(path_bytes "$t")")"; done
+confirm "Permanently delete everything in Trash ($(human "$before"))?" \
+  || { info "Cancelled."; exit 0; }
+
+for t in "${present[@]}"; do
+  # Only the standard subdirs, so we never nuke an unexpected path.
+  for sub in files info expunged; do
+    [[ -d "$t/$sub" ]] && run find "$t/$sub" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  done
+done
+
+after=$(path_bytes "${present[@]}")
+ok "Freed $(human $(( before - after )))."

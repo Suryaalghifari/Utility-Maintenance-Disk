@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# system-clean — run every cleaner in sequence. Pass -y to skip all prompts.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+# Forward the flags we understand to each child command.
+pass=()
+[[ "$ASSUME_YES" == 1 ]] && pass+=(-y)
+[[ "$DRY_RUN"    == 1 ]] && pass+=(-n)
+
+CLEANERS=(trash-clean chrome-clean chrome-sw-clean node-clean journal-clean apt-clean docker-clean snap-clean)
+
+title "system-clean"
+info "Running: ${CLEANERS[*]}"
+
+for c in "${CLEANERS[@]}"; do
+  if [[ -x "$SCRIPT_DIR/$c" ]]; then
+    "$SCRIPT_DIR/$c" "${pass[@]}" || warn "$c exited non-zero, continuing."
+  else
+    warn "$c not found, skipping."
+  fi
+done
+
+echo
+ok "system-clean done. Run 'disk-health' to see the result."

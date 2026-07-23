@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# chrome-sw-clean — clear Service Worker CacheStorage/ScriptCache for every
+# profile of any Chromium-family browser. Safe: caches only. May log out PWAs.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+title "chrome-sw-clean"
+mapfile -t CFG < <(browser_config_dirs)
+if (( ${#CFG[@]} == 0 )); then ok "No browser profiles found."; exit 0; fi
+
+SW=()
+for cfg in "${CFG[@]}"; do
+  while IFS= read -r d; do SW+=("$d"); done \
+    < <(find "$cfg" -maxdepth 2 -type d -name "Service Worker" 2>/dev/null)
+done
+if (( ${#SW[@]} == 0 )); then ok "No Service Worker data."; exit 0; fi
+
+targets=()
+for sw in "${SW[@]}"; do
+  for sub in CacheStorage ScriptCache; do
+    [[ -d "$sw/$sub" ]] && targets+=("$sw/$sub")
+  done
+done
+if (( ${#targets[@]} == 0 )); then ok "Nothing to clean."; exit 0; fi
+
+before=$(path_bytes "${targets[@]}")
+info "Service Worker cache across ${#SW[@]} profile(s): $(human "$before")"
+browser_running && warn "A browser is running — close it first for this to stick."
+confirm "Clear Service Worker caches?" || { info "Cancelled."; exit 0; }
+
+for t in "${targets[@]}"; do run rm -rf "$t"; done
+
+after=$(path_bytes "${targets[@]}")
+ok "Freed $(human $(( before - after )))."
