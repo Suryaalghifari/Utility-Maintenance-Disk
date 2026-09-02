@@ -10,7 +10,7 @@ pass=()
 [[ "$ASSUME_YES" == 1 ]] && pass+=(-y)
 [[ "$DRY_RUN"    == 1 ]] && pass+=(-n)
 
-CLEANERS=(trash-clean chrome-clean chrome-sw-clean node-clean journal-clean apt-clean docker-clean snap-clean)
+CLEANERS=(trash-clean chrome-clean chrome-sw-clean firefox-clean node-clean journal-clean apt-clean docker-clean snap-clean)
 
 title "system-clean"
 info "Running: ${CLEANERS[*]}"

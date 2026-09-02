@@ -1,271 +1,187 @@
 # System Tools
 
-Utility maintenance disk untuk developer. Jaga disk supaya tidak penuh: cek
-dengan `disk-health`, lalu jalankan cleaner yang direkomendasikannya.
+CLI untuk melihat pemakaian disk, menemukan bloat, dan membersihkan cache secara
+aman. Mendukung Linux/Ubuntu dan Windows.
 
-Ada **dua stack** dengan konsep sama:
+## Pilih stack
 
-| Stack | OS | Bahasa | Cara panggil |
-|-------|----|--------|--------------|
-| **`scripts/`** (asli) | Linux/Ubuntu | bash | `disk-health`, `system-clean`, … |
-| **`disktools/`** (baru) | **Windows** (& Linux) | Python | `python -m disktools <cmd>` atau shim `disk-health` |
+| OS | Stack | Jalankan |
+|---|---|---|
+| Linux/Ubuntu | Bash matang (`scripts/`) | `disk-health` |
+| Windows | Python lintas-OS (`disktools/`) | `disk-health --all` atau `python -m disktools disk-health --all` |
 
-`disktools/` **auto-deteksi OS** saat dijalankan (`platform.system()`) dan pilih
-backend yang sesuai. Di bawah "[Windows](#windows-disktools--python-auto-deteksi-os)".
+`disk-health`, `bloat-scan`, dan `junk-report` bersifat read-only. Cleaner selalu
+meminta konfirmasi kecuali memakai `--yes`. Gunakan `--dry-run` untuk melihat
+aksi tanpa menghapus data.
 
-## Install (Linux)
+## Mulai cepat: Linux
 
 ```bash
 ./install.sh
+
+# buka shell baru, lalu:
+disk-health              # lihat pemakaian dan rekomendasi
+system-clean --dry-run   # simulasi semua cleaner aman
+system-clean             # jalankan dengan konfirmasi
 ```
 
-Meng-copy semua script ke `~/bin` dan memastikan `~/bin` ada di `PATH`
-(fish/bash/zsh). Buka shell baru setelahnya. Di mesin lain: salin folder repo
-ini, jalankan `./install.sh` — selesai.
+`install.sh` menyalin command ke `~/bin` dan menambahkan path untuk fish, bash,
+atau zsh.
 
-## Windows (`disktools` — Python, auto-deteksi OS)
+## Mulai cepat: Windows
 
-**Syarat:** Python 3.12+ terpasang (cek `python --version`).
-
-### Cara menjalankan (langkah demi langkah)
-
-**Langkah 1 — Install (sekali saja).** Dari folder repo:
+Syarat: Python 3.12+.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Ini membuat shim tiap command di `.\bin` dan menambahkannya ke PATH user.
-(Pakai `-NoPath` kalau tak mau menyentuh PATH — command tetap jalan lewat
-`python -m disktools`.)
-
-**Langkah 2 — Buka terminal BARU.** ⚠️ Penting: PATH baru **tidak** terbaca oleh
-terminal yang sudah terbuka. Kalau kamu pakai **VS Code / Windows Terminal**,
-tab baru pun belum cukup — **tutup total aplikasinya lalu buka lagi**, atau
-refresh sesi ini tanpa buka terminal baru:
+Tutup dan buka kembali VS Code/Windows Terminal agar PATH baru terbaca. Untuk
+memakai sesi PowerShell aktif:
 
 ```powershell
 $env:Path = "$PWD\bin;$env:Path"
+disk-health --all
+system-clean --dry-run
+system-clean
 ```
 
-**Langkah 3 — Cek terpasang.**
+Tanpa instalasi:
 
 ```powershell
-disk-health --all      # kalau tabel drive muncul → sukses
+python -m disktools disk-health --all
 ```
 
-Kalau muncul `disk-health : The term ... is not recognized`, itu **PATH belum
-ke-refresh** — ulangi Langkah 2 (bukan error program).
+Pilih drive dengan `--drive C[,D]`; gunakan `--all` untuk semua fixed drive.
+Detail implementasi Windows: [docs/windows-plan.md](docs/windows-plan.md).
 
-**Langkah 4 — Pakai.** Alur yang disarankan: **lihat → intip → jalankan.**
-
-```powershell
-disk-health --all            # 1. LIHAT: semua drive (SSD/HDD) + apa yang bisa dibebaskan
-system-clean --dry-run       # 2. INTIP: semua cleaner aman sekaligus (tak menghapus)
-system-clean -y              # 3. JALANKAN: bersihkan + lapor total ruang bebas
-
-# read-only / eksplorasi
-bloat-scan                   # buru bloat senyap: model AI/cache + file model besar
-disk-inspect -i              # selami folder + hapus terarah (default: folder home)
-
-# cleaner satuan (semua dukung --dry-run dulu, dan minta konfirmasi)
-temp-clean -y                # cache Temp
-node-clean -y                # cache dev (npm/pip)
-chrome-clean                 # cache browser (tutup browser dulu)
-chrome-ai-clean              # model AI on-device browser
-trash-clean --all -y         # kosongkan Recycle Bin semua drive
-```
-
-> **Tanpa install** juga bisa — panggil apa pun via `python -m disktools <command>`,
-> mis. `python -m disktools disk-health --all`.
-
-**Aturan aman:** cleaner **tidak akan menghapus** tanpa konfirmasi. Di terminal
-biasa muncul `[y/N]`; kalau dijalankan non-interaktif (pipe/script) tanpa `-y`,
-ia **menolak** dan tak menghapus apa pun. Selalu boleh `--dry-run` dulu.
-
-**Pilih penyimpanan (Target: auto-detect drive).** Semua fixed drive dienumerasi
-+ ditandai ⚡SSD / 💽HDD dan drive sistem `[sistem]`. Pilih via `--drive C[,D]`,
-`--all`, atau prompt interaktif. Non-interaktif tanpa flag → default drive sistem.
-
-**Command Windows saat ini** (bertahap; sisanya menyusul):
-
-| Command | Fungsi | Hapus? |
-|---------|--------|:---:|
-| `disk-health` | Dashboard drive (SSD/HDD) + recoverable per-drive + rekomendasi | — (read-only) |
-| `bloat-scan` | Buru bloat senyap (model AI/runtime/cache) + sapu file model besar | — (read-only) |
-| `disk-inspect [path]` | Selami folder (♻ marker); `-i` = navigasi + hapus terarah | opsional (`-i`) |
-| `system-clean` | Jalankan semua cleaner aman berurutan (1 konfirmasi) | ✔ |
-| `temp-clean` | Cache Temp user + `C:\Windows\Temp` (admin) | ✔ |
-| `node-clean` | Cache dev (`npm-cache`, `pip\Cache`) | ✔ |
-| `chrome-clean` | Cache browser Chromium (Chrome/Edge/Brave) | ✔ |
-| `chrome-ai-clean` | Model AI on-device browser (`OptGuideOnDeviceModel`, dll) | ✔ |
-| `trash-clean` | Kosongkan Recycle Bin (`Clear-RecycleBin`) per drive | ✔ |
-
-**Flag:** `--drive C[,D]` / `--all` (pilih drive) · `-n`/`--dry-run` (intip) ·
-`-y`/`--yes` (skip konfirmasi) · `-i` (disk-inspect interaktif) · `NO_COLOR=1`.
-
-### Mode interaktif `disk-inspect -i`
-
-| Ketik | Aksi |
-|-------|------|
-| `<nomor>` | Masuk ke folder itu |
-| `b` | Back — folder sebelumnya (juga: `u`, `0`, Enter) |
-| `d <nomor>` | Hapus 1 item (mis. `d 2`) |
-| `d 1 3 5` / `d 2-6` | Hapus beberapa / rentang |
-| `d all` | Hapus **semua item `♻`** (cache/junk) di folder itu |
-| `q` | Keluar |
-
-Item `♻` = cache/junk regenerable (aman). Folder sensitif (`.ssh`, `.config`,
-`Windows`, `$Recycle.Bin`, …) otomatis dilindungi dari penghapusan.
-
-> Backend Linux `disktools` sudah ditulis tetapi **belum diverifikasi di mesin
-> Linux** — untuk Linux, pakai stack bash `scripts/` yang matang. Detail rencana &
-> status: [docs/windows-plan.md](docs/windows-plan.md).
-
-## Alur pemakaian (Linux / bash)
+## Alur kerja
 
 ```bash
-# 1. LIHAT — dashboard mendalam: ke mana disk pergi, per aplikasi + rekomendasi
-disk-health
-
-# 2. BERSIHKAN — jalankan command yang muncul di bagian "Recommended",
-#    atau semua cleaner aman sekaligus:
-system-clean
-
-# 3. SELAM MANUAL (opsional) — telusuri sendiri, putuskan hapus atau tidak
-disk-inspect               # TANPA argumen → jelajah SEMUA folder $HOME interaktif
-disk-inspect dbeaver       # cari & bedah data aplikasi tertentu
-disk-inspect dbeaver -i    # mode interaktif untuk app: navigasi + hapus terarah
-
-# 4. BURU BLOAT SENYAP (opsional) — model AI/runtime/cache yang numpuk diam-diam
-bloat-scan                 # read-only; lihat apa yang tumbuh tanpa Anda sadari
-chrome-ai-clean --disable  # hapus model AI Chrome (~4GB) + setop unduh ulang
-
-# 5. SAMPAH LAMA (opsional) — tampilkan file besar/lama untuk Anda review sendiri
-junk-report                # read-only, tidak menghapus apa pun
+disk-health                 # 1. lihat area besar dan ruang recoverable
+bloat-scan                  # 2. klasifikasikan cache, artifact, runtime, dan file besar
+disk-inspect <path>         # 3. bedah folder tertentu
+system-clean --dry-run      # 4. verifikasi rencana pembersihan
+system-clean                # 5. bersihkan setelah konfirmasi
 ```
 
-`disk-health` sekarang membedah tiap area: `$HOME`, per-browser (cache /
-service worker / profil + **komponen & model AI internal** yang sering diunduh
-diam-diam, mis. model on-device Chrome ~4 GB), dev-cache
-(npm/pnpm/pip/composer/playwright), journal, snap, docker, apt, trash — lalu
-memetakan tiap temuan besar ke command yang tepat.
+Contoh inspeksi:
 
-### Kontrol mode interaktif (`disk-inspect -i`)
+```bash
+disk-inspect ~/.local
+disk-inspect ~/snap --depth 3
+disk-inspect -i             # navigasi dan hapus terarah
+disk-inspect dbeaver -i     # cari aplikasi lalu buka mode interaktif
+```
 
-| Ketik | Aksi |
-|-------|------|
-| `<nomor>` | Masuk ke folder itu (menyelam lebih dalam) |
-| `b` | **Back** — kembali ke folder sebelumnya (juga: `u`, `0`, atau Enter) |
-| `d <nomor>` | Hapus 1 item — mis. `d 2` (juga bisa `d2`) |
-| `d 1 3 5` | Hapus beberapa item sekaligus |
-| `d 2-6` | Hapus rentang nomor |
-| `d all` | Hapus **semua item bertanda `♻`** di folder itu (data dilewati) |
-| `d` | Tanya dulu mau hapus yang mana |
-| `q` | Keluar |
+## Memahami hasil
 
-Hapus (berapa pun jumlahnya) menampilkan daftar + total ukuran dan minta **satu**
-konfirmasi `[y/N]`. Item di luar `$HOME` atau folder sensitif (`.config`, `.ssh`,
-`.gnupg`, …) otomatis ditolak/dilewati. `d all` **hanya** menyentuh item `♻`
-(cache/junk) — data/konfigurasi Anda aman.
+Ukuran dan keamanan dipisahkan. Folder merah berarti besar, bukan otomatis
+sampah.
 
-## Arti warna
+| Indikator ukuran | Nilai |
+|---|---|
+| Hijau | kurang dari 300 MB |
+| Kuning | 300 MB sampai kurang dari 1 GB |
+| Merah | minimal 1 GB |
 
-Titik warna di `disk-health` / `disk-inspect` menandakan seberapa besar sebuah
-item — makin merah, makin layak diperiksa/dibersihkan.
+Untuk disk: hijau di bawah 80%, kuning 80–89%, merah minimal 90%.
 
-**Untuk ukuran folder/file:**
+`bloat-scan` memakai klasifikasi berikut:
 
-| Warna | Ukuran | Arti |
-|:---:|---|---|
-| 🟢 | < 300 MB | Kecil — aman diabaikan |
-| 🟡 | 300 MB – 1 GB | Sedang — pantau |
-| 🔴 | ≥ 1 GB | Besar — kandidat utama dibersihkan |
+| Kelas | Arti | Tindakan |
+|---|---|---|
+| `SAFE CLEAN` | Cache/temp/log regenerable | Jalankan cleaner terkait |
+| `PRUNE` | Artifact dapat dibuat ulang tetapi mungkin masih dipakai | Review lalu prune memakai package manager |
+| `INSPECT` | Data, runtime aktif, atau file belum terbukti junk | Periksa; jangan hapus hanya karena besar |
 
-**Untuk pemakaian disk (baris Root):**
+Item `♻ aman hapus` dalam `disk-inspect` adalah cache/junk regenerable. Item tanpa
+penanda dianggap data atau konfigurasi.
 
-| Warna | Terpakai | Arti |
-|:---:|---|---|
-| 🟢 | < 80% | Sehat |
-| 🟡 | 80–89% | Mulai penuh |
-| 🔴 | ≥ 90% | Kritis — segera bersihkan |
+## Command Linux
 
-⚪ = tidak tersedia / tidak bisa diukur (mis. Docker saat daemon mati).
+### Pemeriksaan
 
-**Penanda aman-hapus (`disk-inspect`):**
-
-Item bertanda **`♻ aman hapus`** adalah cache/junk yang regenerasi otomatis
-(mis. `.cache`, `Code Cache`, `_cacache`, `thumbnails`, `logs`) — aman dibuang,
-akan dibuat ulang saat dibutuhkan. Di mode interaktif, total yang aman dihapus di
-folder aktif juga ditampilkan (`♻ aman dihapus di sini: …`). Item **tanpa** tanda
-ini = data/konfigurasi Anda → hati-hati.
-
-> Warna hanya soal **ukuran**, bukan "sampah atau bukan". Folder 🔴 besar bisa saja
-> data penting (mis. `~/snap/firefox` = profil Anda). Pakai `disk-inspect` untuk
-> memastikan isinya sebelum menghapus.
-
-## Commands (Linux / bash)
-
-### Lihat & lacak
 | Command | Fungsi |
-|---------|--------|
-| `disk-health` | Dashboard mendalam: rincian pemakaian per aplikasi + total recoverable + rekomendasi |
-| `disk-inspect [path\|app]` | **Tanpa argumen → jelajah semua `$HOME` interaktif.** Beri path/nama app untuk bedah spesifik. `-i` = navigasi + hapus terarah, `--depth N` = kedalaman |
-| `bloat-scan [MIN_MB]` | **Read-only.** Buru "bloat senyap": model AI, komponen browser, cache installer, runtime besar + sapu file besar apa pun (default ≥ 200 MB) |
-| `junk-report [DAYS] [MB]` | **Read-only.** Daftar folder terbesar + file besar-&-lama untuk Anda review (default 90 hari, 100 MB) |
+|---|---|
+| `disk-health` | Dashboard pemakaian, recoverable space, dan rekomendasi |
+| `bloat-scan [MIN_MB]` | Scan read-only dengan klasifikasi; file besar default minimal 200 MB |
+| `disk-inspect [path\|app]` | Bedah folder; `-i` interaktif, `--depth N` mengatur kedalaman |
+| `junk-report [DAYS] [MB]` | Daftar read-only file besar dan lama; default 90 hari/100 MB |
 
-### Cleaner (aman, selalu konfirmasi)
-| Command | Membersihkan | Butuh sudo |
-|---------|--------------|:---:|
-| `chrome-clean` | Cache browser Chromium (Chrome/Chromium/Brave/Edge/Vivaldi) | — |
-| `chrome-sw-clean` | Service Worker cache tiap profil browser | — |
-| `chrome-ai-clean [--disable]` | Hapus model AI on-device Chrome (bisa **~4 GB**). `--disable` = pasang policy agar tak diunduh ulang | `--disable` saja |
-| `node-clean` | Cache npm/pnpm/pip/composer | — |
-| `trash-clean` | Isi Trash (home + drive ter-mount) | — |
-| `journal-clean [SIZE]` | Vacuum journald (default sisakan `200M`) | ✔ |
-| `apt-clean` | Cache `.deb` + autoremove paket orphan/kernel lama | ✔ |
-| `docker-clean [--all]` | `docker system prune` (`--all` = + image & volume) | grup docker |
-| `snap-clean` | Revisi snap lama + set `refresh.retain=2` | ✔ |
+### Cleaner
 
-### Orkestrasi
+| Command | Target |
+|---|---|
+| `chrome-clean` | Cache Chrome/Chromium/Brave/Edge/Vivaldi/Opera |
+| `chrome-sw-clean` | Service Worker CacheStorage Chromium |
+| `firefox-clean` | Cache Firefox native dan Snap |
+| `chrome-ai-clean [--disable]` | Model AI browser; `--disable` mencegah unduh ulang via policy |
+| `node-clean` | Cache npm, pnpm, pip, dan Composer |
+| `trash-clean` | Trash home dan drive ter-mount |
+| `journal-clean [SIZE]` | Vacuum journald; default sisakan 200 MB |
+| `apt-clean` | Cache `.deb` dan paket orphan/kernel lama |
+| `docker-clean [--all]` | Docker prune; `--all` lebih agresif |
+| `snap-clean` | Revisi Snap disabled dan `refresh.retain=2` |
+| `system-clean` | Jalankan seluruh cleaner aman berurutan |
+| `update-cleaner` | Pull repo lalu instal ulang |
+
+Tutup browser sebelum membersihkan cache. `chrome-ai-clean --disable`, apt,
+journal, dan Snap dapat membutuhkan `sudo`.
+
+## Command Windows
+
 | Command | Fungsi |
-|---------|--------|
-| `system-clean` | Jalankan semua cleaner aman berurutan |
-| `update-cleaner` | Update dari repo lalu install ulang |
+|---|---|
+| `disk-health` | Dashboard drive SSD/HDD, recoverable space, dan rekomendasi |
+| `bloat-scan` | Scan read-only dengan klasifikasi `SAFE CLEAN`/`PRUNE`/`INSPECT` |
+| `disk-inspect [path]` | Bedah folder; `-i` membuka mode interaktif |
+| `system-clean` | Jalankan cleaner aman dengan satu konfirmasi |
+| `temp-clean` | Temp user dan `C:\Windows\Temp` |
+| `node-clean` | Cache npm dan pip |
+| `chrome-clean` | Cache browser Chromium |
+| `chrome-ai-clean` | Model AI on-device Chromium |
+| `trash-clean` | Recycle Bin per drive |
 
-## Flag global
+## Flag
 
-Berlaku untuk semua cleaner:
-
-| Flag | Arti |
-|------|------|
-| `-y`, `--yes` | Lewati semua konfirmasi (non-interaktif) |
-| `-n`, `--dry-run` | Tampilkan yang akan dijalankan, **tanpa** mengeksekusi |
+| Flag | Fungsi |
+|---|---|
+| `-n`, `--dry-run` | Tampilkan aksi tanpa menghapus |
+| `-y`, `--yes` | Lewati konfirmasi |
+| `--drive C[,D]` | Pilih drive Windows |
+| `--all` | Pilih semua fixed drive Windows |
+| `-i` | Mode interaktif `disk-inspect` |
 | `NO_COLOR=1` | Matikan warna |
 
-Contoh:
+## Mode interaktif `disk-inspect -i`
+
+| Input | Aksi |
+|---|---|
+| `<nomor>` | Masuk ke folder |
+| `b`, `u`, `0`, atau Enter | Kembali |
+| `d <nomor>` | Hapus item terpilih |
+| `d 1 3 5` atau `d 2-6` | Hapus beberapa item |
+| `d all` | Hapus semua item `♻` di folder aktif |
+| `q` | Keluar |
+
+Penghapusan menampilkan daftar dan total ukuran, lalu meminta satu konfirmasi.
+Folder sensitif seperti `.ssh`, `.gnupg`, `.config`, `Windows`, dan
+`$Recycle.Bin` dilindungi.
+
+## Prinsip keamanan
+
+- Ukuran menunjukkan prioritas, bukan keamanan penghapusan.
+- Tidak ada penghapusan otomatis berdasarkan umur file.
+- Cleaner hanya menyentuh target terukur dan regenerable.
+- Tool/platform yang tidak tersedia dilewati dengan aman.
+- Gunakan cleaner atau package-manager native; jangan hapus store/runtime secara
+  massal.
+
+## Pengembangan
 
 ```bash
-disk-health                 # lihat kondisi + rekomendasi
-chrome-clean -n             # intip apa yang akan dihapus (aman)
-node-clean                  # bebaskan cache npm/pnpm/pip/composer
-journal-clean 100M          # sisakan hanya 100 MB log
-system-clean -y             # bersih total tanpa tanya
-docker-clean --all          # prune docker paling agresif
-disk-inspect ~/.vscode      # bedah folder tertentu
-disk-inspect slack -i       # selami data app, hapus manual sambil jalan
-junk-report 30 200          # file >200MB & >30 hari tak disentuh
+npm run test
 ```
 
-## Prinsip
-
-- Cleaner **selalu konfirmasi** sebelum menghapus (kecuali `-y`), dan lapor
-  ruang yang dibebaskan.
-- **Tidak ada auto-hapus file berdasarkan umur.** File lama belum tentu sampah,
-  jadi `junk-report` hanya *menampilkan* — keputusan hapus tetap di tangan Anda.
-- Tool yang tidak terpasang (mis. `pnpm`, `snap`, `docker`) di-skip otomatis →
-  aman dipindah ke mesin Ubuntu/Linux lain.
-- Untuk browser, tutup dulu sebelum `chrome-clean` supaya cache tak langsung
-  dibuat ulang.
-- `update-cleaner` mencari repo di `~/Projects/system-tools`; ubah lewat env
-  `SYSTEM_TOOLS_DIR` bila lokasinya beda.
+Test menjalankan unit test Python dan pemeriksaan sintaks seluruh script Bash.

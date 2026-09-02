@@ -1,0 +1,23 @@
+{
+  "name": "system-tools",
+  "version": "1.0.0",
+  "description": "Utility maintenance disk untuk developer. Jaga disk supaya tidak penuh: cek dengan `disk-health`, lalu jalankan cleaner yang direkomendasikannya.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "python3 -m unittest discover -s tests -v && bash -n scripts/*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Suryaalghifari/Utility-Maintenance-Disk.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Suryaalghifari/Utility-Maintenance-Disk/issues"
+  },
+  "homepage": "https://github.com/Suryaalghifari/Utility-Maintenance-Disk#readme"
+}

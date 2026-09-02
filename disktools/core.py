@@ -184,7 +184,8 @@ class Area:
     recommend: str = ""          # command/hint that reclaims it
     note: str = ""
     admin: bool = False          # needs Administrator/root
-    safe: bool = True            # True = regenerable cache/junk; False = real dependency
+    safe: bool = True            # compatibility: True = regenerable cache/junk
+    action: str = ""             # SAFE CLEAN | PRUNE | INSPECT; empty derives from safe
     bytes: int = 0               # filled in by measurement
     existing: list[str] = field(default_factory=list)  # paths that actually exist here
 
