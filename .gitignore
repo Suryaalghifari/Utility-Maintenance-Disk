@@ -1,0 +1,6 @@
+# Python runtime caches
+__pycache__/
+*.py[cod]
+
+# Generated code-graph reports and caches
+graphify-out/
