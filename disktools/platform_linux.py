@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 from .core import Area, Drive, dir_size, walk_big_files
 
@@ -133,22 +134,75 @@ def cleanable_areas(drive: Drive) -> list[Area]:
 
 
 # --- bloat-scan (read-only) --------------------------------------------------
+def _pnpm_store_path() -> str:
+    """Ask pnpm for active store. Empty when pnpm is unavailable."""
+    try:
+        result = subprocess.run(
+            ["pnpm", "store", "path"], capture_output=True, text=True, timeout=5,
+        )
+        return os.path.realpath(result.stdout.strip()) if result.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _node_modules_candidates(home: str) -> list[str]:
+    """Find project node_modules without descending into hidden/runtime trees."""
+    found: list[str] = []
+    skip = {"snap", "node_modules"}
+    for root, dirs, _ in os.walk(home):
+        if "node_modules" in dirs:
+            found.append(os.path.join(root, "node_modules"))
+        # Hidden top-level trees usually hold active tool/runtime state, not source trees.
+        dirs[:] = [d for d in dirs if d not in skip and not d.startswith(".")]
+        if len(Path(root).relative_to(home).parts) >= 4:
+            dirs[:] = []
+    return found
+
+
 def _bloat_candidates() -> list[Area]:
     home = os.path.expanduser("~")
-    return [
+    active_store = _pnpm_store_path()
+    stores_root = os.path.join(home, ".local", "share", "pnpm", "store")
+    stores = []
+    try:
+        stores = [e.path for e in os.scandir(stores_root) if e.is_dir()]
+    except OSError:
+        pass
+
+    areas = [
+        Area("npm cache", [os.path.join(home, ".npm", "_cacache")],
+             recommend="node-clean", action="SAFE CLEAN",
+             note="alasan: package cache regenerable; bersihkan via npm cache clean"),
+        Area("npx execution cache", [os.path.join(home, ".npm", "_npx")],
+             action="PRUNE", note="alasan: sandbox paket npx regenerable; review versi lama"),
+        Area("Firefox Snap cache", [os.path.join(home, "snap", "firefox", "common", ".cache")],
+             action="SAFE CLEAN", note="alasan: cache browser regenerable; tutup Firefox dulu"),
         Area("HuggingFace cache", [os.path.join(home, ".cache", "huggingface")],
-             note="re-download model saat dipakai"),
-        Area("Ollama models", [os.path.join(home, ".ollama", "models")],
-             safe=False, note="model LLM lokal — dependency"),
-        Area("Torch cache", [os.path.join(home, ".cache", "torch")],
-             note="re-download bila dipakai"),
-        Area("VS Code extensions", [os.path.join(home, ".vscode", "extensions")],
-             safe=False, note="extension aktif — dependency"),
-        Area("Gradle caches", [os.path.join(home, ".gradle", "caches")],
-             note="re-download dependency saat build"),
-        Area(".nuget packages", [os.path.join(home, ".nuget", "packages")],
-             safe=False, note="dependency .NET"),
+             action="PRUNE", note="alasan: model bisa diunduh ulang; bandwidth mahal"),
+        Area("Ollama models", [os.path.join(home, ".ollama", "models")], safe=False,
+             action="INSPECT", note="alasan: model runtime lokal aktif, bukan junk"),
+        Area("Torch cache", [os.path.join(home, ".cache", "torch")], action="PRUNE",
+             note="alasan: dependency dapat diunduh ulang; cek proyek aktif"),
+        Area("VS Code extensions", [os.path.join(home, ".vscode", "extensions")], safe=False,
+             action="INSPECT", note="alasan: extension runtime aktif, bukan cache"),
+        Area("Neovim data", [os.path.join(home, ".local", "share", "nvim")], safe=False,
+             action="INSPECT", note="alasan: plugin/runtime Neovim aktif, bukan junk"),
+        Area("uv tool data", [os.path.join(home, ".local", "share", "uv")], safe=False,
+             action="INSPECT", note="alasan: runtime/tool uv aktif; gunakan uv tool/cache command"),
+        Area("Gradle caches", [os.path.join(home, ".gradle", "caches")], action="PRUNE",
+             note="alasan: dependency build regenerable; gunakan gradle cleanup bila tersedia"),
     ]
+    for store in stores:
+        if active_store and os.path.realpath(store) == active_store:
+            areas.append(Area("pnpm active store", [store], safe=False, action="INSPECT",
+                              note="alasan: store aktif menurut pnpm store path, jangan hapus"))
+        else:
+            areas.append(Area("pnpm legacy store", [store], action="PRUNE",
+                              note="alasan: bukan store aktif; review lalu pnpm store prune"))
+    for path in _node_modules_candidates(home):
+        areas.append(Area("project node_modules", [path], action="PRUNE",
+                          note="alasan: artifact dependency regenerable; pastikan proyek tidak aktif"))
+    return areas
 
 
 def bloat_locations() -> list[Area]:
@@ -177,6 +231,23 @@ def bloat_roots() -> list[str]:
 def big_files(threshold: int | None = None) -> list[tuple[int, str]]:
     from .core import BIG_FILE_THRESHOLD
     return walk_big_files(bloat_roots(), threshold or BIG_FILE_THRESHOLD)
+
+
+def clean_native(area_key: str, paths: list[str]) -> int | None:
+    """Use package-manager cleanup APIs. None means no native implementation."""
+    if area_key != "node-clean":
+        return None
+    before = sum(dir_size(p) for p in paths)
+    commands = [
+        (["npm", "cache", "clean", "--force"], "npm"),
+        (["pnpm", "store", "prune"], "pnpm"),
+        (["pip3", "cache", "purge"], "pip3"),
+    ]
+    for argv, executable in commands:
+        if shutil.which(executable):
+            subprocess.run(argv, check=False)
+    after = sum(dir_size(p) for p in paths)
+    return max(before - after, 0)
 
 
 def empty_trash(drive: Drive, dry_run: bool) -> tuple[int, int]:

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# firefox-clean — delete native/Snap Firefox caches. Firefox rebuilds them.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+parse_flags "$@"
+
+title "firefox-clean"
+mapfile -t DIRS < <(firefox_cache_dirs)
+if (( ${#DIRS[@]} == 0 )); then ok "No Firefox cache found."; exit 0; fi
+
+firefox_running && warn "Firefox is running — close it first, else cache is recreated immediately."
+
+before=$(path_bytes "${DIRS[@]}")
+for d in "${DIRS[@]}"; do info "Firefox cache: $(human "$(path_bytes "$d")")  $d"; done
+confirm "Delete ${#DIRS[@]} Firefox cache location(s)?" || { info "Cancelled."; exit 0; }
+
+for d in "${DIRS[@]}"; do
+  run find "$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+done
+
+if [[ "$DRY_RUN" == 1 ]]; then
+  ok "Would free approximately $(human "$before"); nothing deleted."
+  exit 0
+fi
+
+after=$(path_bytes "${DIRS[@]}")
+ok "Freed $(human $(( before - after )))."

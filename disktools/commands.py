@@ -106,6 +106,13 @@ def clean(backend, selected: list[Drive], area_key: str, *, dry_run: bool,
         core.info("Dibatalkan — tidak ada yang dihapus.")
         return
 
+    native = getattr(backend, "clean_native", None)
+    native_freed = native(area_key, [p for a in matches for p in a.existing]) if native else None
+    if native_freed is not None:
+        core.ok(f"Dibebaskan {C_BOLD}{human(native_freed)}{C_RESET} via native command.")
+        print()
+        return
+
     freed_total = 0
     for a in matches:
         _, freed = core.reclaim(a.existing, dry_run=False)
@@ -184,7 +191,13 @@ def system_clean(backend, selected: list[Drive], *, dry_run: bool,
         return
 
     freed = 0
+    native = getattr(backend, "clean_native", None)
     for key in _SAFE_STEPS:
+        paths = [p for a in step_areas[key] for p in a.existing]
+        native_freed = native(key, paths) if native and paths else None
+        if native_freed is not None:
+            freed += native_freed
+            continue
         for a in step_areas[key]:
             _, f = core.reclaim(a.existing, dry_run=False)
             freed += f
@@ -319,17 +332,25 @@ def bloat_scan(backend, threshold: int | None = None) -> None:
     if not locs:
         core.ok("Tidak ada lokasi bloat terukur.")
     else:
-        reclaimable = 0
+        safe_total = 0
+        core.info("Threshold adaptif: medium ≥300 MB · large ≥1 GB · huge ≥5 GB")
         for a in locs:
-            if a.safe:
-                tag = f"{C_GREEN}♻ cache{C_RESET}"
-                reclaimable += a.bytes
+            action = a.action or ("SAFE CLEAN" if a.safe else "INSPECT")
+            tier = ("huge" if a.bytes >= 5 * core.GB else
+                    "large" if a.bytes >= core.GB else
+                    "medium" if a.bytes >= core.SIZE_YELLOW else "small")
+            if action == "SAFE CLEAN":
+                tag = f"{C_GREEN}{action}{C_RESET}"
+                safe_total += a.bytes
+            elif action == "PRUNE":
+                tag = f"{C_YELLOW}{action}{C_RESET}"
             else:
-                tag = f"{C_YELLOW}◆ dependency{C_RESET}"
+                tag = f"{C_CYAN}{action}{C_RESET}"
             note = f"  {C_DIM}{a.note}{C_RESET}" if a.note else ""
-            print(f"  {size_dot(a.bytes)} {a.name:<28} {human(a.bytes):>10}  {tag}{note}")
-        print(f"\n  {C_BOLD}≈ {human(reclaimable)}{C_RESET} aman dibebaskan "
-              f"{C_DIM}(hanya kategori ♻ cache; ◆ dependency dibiarkan){C_RESET}")
+            print(f"  {size_dot(a.bytes)} [{tier:<6}] {tag:<10} {a.name:<24} "
+                  f"{human(a.bytes):>10}  {a.existing[0]}{note}")
+        print(f"\n  {C_BOLD}≈ {human(safe_total)}{C_RESET} SAFE CLEAN; "
+              f"PRUNE wajib review/native command; INSPECT bukan junk.")
 
     core.hr()
     core.title("File model/weight besar")

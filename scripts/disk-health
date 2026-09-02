@@ -93,6 +93,13 @@ else
   fi
 fi
 
+mapfile -t FCACHE < <(firefox_cache_dirs)
+f_cache=$(path_bytes "${FCACHE[@]:-}")
+if (( ${#FCACHE[@]} )); then
+  line "$(size_dot "$f_cache")" "Firefox cache" "$f_cache"
+  (( f_cache >= 314572800 )) && rec "firefox-clean" "Firefox cache is $(human "$f_cache") (close Firefox first)"
+fi
+
 # --- Dev / package-manager caches -------------------------------------------
 # Real cache locations node-clean actually clears (npm lives in ~/.npm, not ~/.cache).
 hr
@@ -164,7 +171,7 @@ printf '  %s %-16s %s\n' "$(size_dot "$trash")" "Trash" "$(human "$trash")"
 (( trash > 0 )) && rec "trash-clean" "Trash holds $(human "$trash")"
 
 # --- Recoverable + recommendations ------------------------------------------
-recoverable=$(( ${b_cache:-0} + ${sw_total:-0} + journal_recover + docker_reclaim_bytes + dev_total + trash + ${br_recl:-0} ))
+recoverable=$(( ${b_cache:-0} + ${sw_total:-0} + ${f_cache:-0} + journal_recover + docker_reclaim_bytes + dev_total + trash + ${br_recl:-0} ))
 hr
 title "Safely recoverable now"
 printf '  %s≈ %s%s  (browser cache/internals + service worker + journal + docker + dev caches + trash)\n' \

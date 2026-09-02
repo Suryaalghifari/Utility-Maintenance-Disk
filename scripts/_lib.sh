@@ -39,6 +39,15 @@ size_dot() {
   else                    printf '🟢'; fi
 }
 
+# adaptive_size BYTES -> tier used by bloat scans (small/large/huge).
+adaptive_size() {
+  local b="${1:-0}"
+  if   (( b >= 5368709120 )); then printf 'huge'
+  elif (( b >= 1073741824 )); then printf 'large'
+  elif (( b >= 314572800 )); then printf 'medium'
+  else                            printf 'small'; fi
+}
+
 # pct_dot PERCENT [yellow=80] [red=90]
 pct_dot() {
   local p="${1:-0}" y="${2:-80}" r="${3:-90}"
@@ -116,6 +125,18 @@ browser_config_dirs() {
 # browser_running -> 0 if any Chromium-family browser process is alive
 browser_running() {
   pgrep -f 'chrome|chromium|brave|msedge|vivaldi|opera' >/dev/null 2>&1
+}
+
+# firefox_cache_dirs -> existing native and Snap Firefox cache roots.
+firefox_cache_dirs() {
+  local d
+  for d in "$HOME/.cache/mozilla/firefox" "$HOME/snap/firefox/common/.cache"; do
+    [[ -d "$d" ]] && printf '%s\n' "$d"
+  done
+}
+
+firefox_running() {
+  pgrep -x firefox >/dev/null 2>&1 || pgrep -x firefox-bin >/dev/null 2>&1
 }
 
 # Browser-profile subdirs that are reclaimable: GPU/shader caches, crx caches,
