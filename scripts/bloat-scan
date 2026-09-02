@@ -44,7 +44,10 @@ shopt -s nullglob
 for store in "$HOME/.local/share/pnpm/store"/*; do
   [[ -d "$store" ]] || continue
   resolved=$(realpath -m "$store")
-  if [[ -n "$active_pnpm" && "$resolved" == "$active_pnpm" ]]; then
+  if [[ -z "$active_pnpm" ]]; then
+    report_bloat "$store" "pnpm store" "INSPECT" \
+      "status store aktif tidak diketahui; pnpm store path tidak tersedia"
+  elif [[ "$resolved" == "$active_pnpm" ]]; then
     report_bloat "$store" "pnpm active store" "INSPECT" \
       "store aktif menurut pnpm store path; jangan hapus"
   else

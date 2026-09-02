@@ -9,7 +9,12 @@ title "firefox-clean"
 mapfile -t DIRS < <(firefox_cache_dirs)
 if (( ${#DIRS[@]} == 0 )); then ok "No Firefox cache found."; exit 0; fi
 
-firefox_running && warn "Firefox is running — close it first, else cache is recreated immediately."
+if firefox_running && [[ "$DRY_RUN" != 1 ]]; then
+  warn "Firefox is running — cleanup blocked to protect the active profile."
+  info "Cancelled. Close Firefox, then re-run."
+  exit 0
+fi
+firefox_running && warn "Firefox is running — dry-run only; close it before cleanup."
 
 before=$(path_bytes "${DIRS[@]}")
 for d in "${DIRS[@]}"; do info "Firefox cache: $(human "$(path_bytes "$d")")  $d"; done
