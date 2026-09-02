@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from disktools import commands, platform_linux
+from disktools import commands, platform_linux, platform_windows
 from disktools.core import Area, Drive
 
 MB = 1024 * 1024
@@ -113,6 +113,56 @@ class AdaptiveBloatAcceptanceTest(unittest.TestCase):
             with contextlib.redirect_stdout(output):
                 commands.bloat_scan(backend)
         self.assert_acceptance_output(output.getvalue())
+
+    def test_unknown_pnpm_store_identity_stays_inspect(self) -> None:
+        env = {**self.env, "PATH": "/usr/bin:/bin"}
+        result = subprocess.run(
+            ["bash", "scripts/bloat-scan"], cwd=Path(__file__).parents[1],
+            env=env, text=True, capture_output=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        store_lines = [line for line in result.stdout.splitlines()
+                       if "pnpm store " in line and "payload.bin" not in line]
+        self.assertTrue(store_lines)
+        self.assertTrue(all("INSPECT" in line for line in store_lines), store_lines)
+        self.assertTrue(all("status store aktif tidak diketahui" in line for line in store_lines))
+
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(platform_linux, "_pnpm_store_path", return_value=""):
+            areas = [a for a in platform_linux.bloat_locations()
+                     if "pnpm" in a.name.lower()]
+        self.assertTrue(areas)
+        self.assertTrue(all(a.action == "INSPECT" for a in areas))
+        self.assertTrue(all("tidak diketahui" in a.note for a in areas))
+
+    def test_linux_native_cleanup_runs_only_matching_manager(self) -> None:
+        npm_cache = str(self.home / ".npm/_cacache")
+        with mock.patch.dict(os.environ, self.env, clear=True), \
+             mock.patch.object(platform_linux.shutil, "which", return_value="/bin/tool"), \
+             mock.patch.object(platform_linux.subprocess, "run") as run, \
+             mock.patch.object(platform_linux, "dir_size", side_effect=[100, 0]):
+            freed = platform_linux.clean_native("node-clean", [npm_cache])
+        self.assertEqual(freed, 100)
+        run.assert_called_once_with(["npm", "cache", "clean", "--force"], check=False)
+
+    def test_windows_review_artifacts_are_not_safe_clean(self) -> None:
+        actions = {a.name: a.action for a in platform_windows._bloat_candidates()}
+        for name in ("Chrome AI on-device models", "HuggingFace cache", "Torch cache",
+                     "VSIX cache", "Gradle caches"):
+            self.assertEqual(actions[name], "PRUNE", name)
+
+    def test_running_firefox_requires_separate_override(self) -> None:
+        pgrep = self.bin / "pgrep"
+        pgrep.write_text("#!/bin/sh\nexit 0\n")
+        pgrep.chmod(0o755)
+        payload = self.home / "snap/firefox/common/.cache/payload.bin"
+        result = subprocess.run(
+            ["bash", "scripts/firefox-clean"], cwd=Path(__file__).parents[1],
+            env=self.env, text=True, capture_output=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(payload.exists())
+        self.assertIn("Cancelled. Close Firefox", result.stdout)
 
     def test_cleanup_native_command_respects_dry_run_and_confirmation(self) -> None:
         drive = Drive(id="/", label="", media="SSD", size=10, free=5, is_system=True)

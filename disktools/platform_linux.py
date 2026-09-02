@@ -193,7 +193,11 @@ def _bloat_candidates() -> list[Area]:
              note="alasan: dependency build regenerable; gunakan gradle cleanup bila tersedia"),
     ]
     for store in stores:
-        if active_store and os.path.realpath(store) == active_store:
+        if not active_store:
+            areas.append(Area("pnpm store", [store], safe=False, action="INSPECT",
+                              note="alasan: status store aktif tidak diketahui; "
+                                   "pnpm store path tidak tersedia"))
+        elif os.path.realpath(store) == active_store:
             areas.append(Area("pnpm active store", [store], safe=False, action="INSPECT",
                               note="alasan: store aktif menurut pnpm store path, jangan hapus"))
         else:
@@ -238,14 +242,21 @@ def clean_native(area_key: str, paths: list[str]) -> int | None:
     if area_key != "node-clean":
         return None
     before = sum(dir_size(p) for p in paths)
+    home = os.path.expanduser("~")
     commands = [
-        (["npm", "cache", "clean", "--force"], "npm"),
-        (["pnpm", "store", "prune"], "pnpm"),
-        (["pip3", "cache", "purge"], "pip3"),
+        (["npm", "cache", "clean", "--force"], "npm",
+         os.path.join(home, ".npm", "_cacache")),
+        (["pip3", "cache", "purge"], "pip3",
+         os.path.join(home, ".cache", "pip")),
     ]
-    for argv, executable in commands:
-        if shutil.which(executable):
+    ran = False
+    normalized = {os.path.realpath(p) for p in paths}
+    for argv, executable, owned_path in commands:
+        if os.path.realpath(owned_path) in normalized and shutil.which(executable):
             subprocess.run(argv, check=False)
+            ran = True
+    if not ran:
+        return None
     after = sum(dir_size(p) for p in paths)
     return max(before - after, 0)
 
